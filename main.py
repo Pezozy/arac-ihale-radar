@@ -3,6 +3,7 @@ Araç İhale Radar — Ana Giriş Noktası
 Bot, scheduler ve Stripe webhook sunucusunu başlatır.
 """
 import asyncio
+import signal
 import sys
 import threading
 import traceback
@@ -28,40 +29,8 @@ def run_webhook_server():
     )
 
 
-async def post_init(app: Application):
-    """Bot başladıktan sonra çalışır — admin'e bildirim gönderir."""
-    set_bot_instance(app.bot)
-
-    await send_telegram_message(
-        settings.TELEGRAM_ADMIN_ID,
-        "🚀 Araç İhale Radar başlatıldı!\n\n"
-        "✅ Scraper: Aktif\n"
-        "✅ Scheduler: Aktif\n"
-        "✅ Stripe webhook: Aktif\n\n"
-        "📅 Sabah bülteni: 08:00\n"
-        "📅 Akşam bülteni: 18:00\n\n"
-        "/istatistik ile detayları görebilirsiniz.",
-    )
-    log("🚀 Bot başlatıldı — tüm sistemler aktif")
-
-
 async def main():
     """Ana fonksiyon — her şeyi başlatır."""
-    # Global exception handler
-    def handle_exception(loop, context):
-        msg = context.get("exception", context["message"])
-        log(f"Yakalanmamış hata: {msg}", "error")
-        # Admin'e bildir (sync olmadan)
-        asyncio.create_task(
-            send_telegram_message(
-                settings.TELEGRAM_ADMIN_ID,
-                f"⚠️ Kritik hata:\n{msg}",
-            )
-        )
-
-    loop = asyncio.get_event_loop()
-    loop.set_exception_handler(handle_exception)
-
     # 1. Veritabanını başlat
     await init_db()
     log("✅ Veritabanı hazır")
@@ -70,7 +39,6 @@ async def main():
     app = (
         Application.builder()
         .token(settings.TELEGRAM_BOT_TOKEN)
-        .post_init(post_init)
         .build()
     )
 
@@ -96,22 +64,52 @@ async def main():
     scheduler.start()
     log("✅ Zamanlanmış görevler aktif")
 
-    # Zamanlanmış görevleri listele
-    jobs = scheduler.get_jobs()
-    for job in jobs:
+    for job in scheduler.get_jobs():
         log(f"  📅 {job.name}: {job.trigger}")
 
-    # 6. Bot'u başlat (sonsuz döngü)
-    log("🚀 Telegram botu başlatılıyor...")
-    await app.run_polling(drop_pending_updates=True)
+    # 6. Bot'u başlat (low-level API — event loop çakışması önlenir)
+    await app.initialize()
+    set_bot_instance(app.bot)
+
+    # Admin'e başlangıç bildirimi
+    if settings.TELEGRAM_ADMIN_ID:
+        await send_telegram_message(
+            settings.TELEGRAM_ADMIN_ID,
+            "🚀 Araç İhale Radar başlatıldı!\n\n"
+            "✅ Scraper: Aktif\n"
+            "✅ Scheduler: Aktif\n"
+            "✅ Stripe webhook: Aktif\n\n"
+            "📅 Sabah bülteni: 08:00\n"
+            "📅 Akşam bülteni: 18:00\n\n"
+            "/istatistik ile detayları görebilirsiniz.",
+        )
+
+    await app.start()
+    await app.updater.start_polling(drop_pending_updates=True)
+    log("🚀 Telegram botu başlatıldı — tüm sistemler aktif")
+
+    # Sonsuz bekle — sinyal gelene kadar
+    stop_event = asyncio.Event()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop_event.set)
+
+    await stop_event.wait()
+
+    # Temiz kapanış
+    log("Bot kapatılıyor...")
+    await app.updater.stop()
+    await app.stop()
+    await app.shutdown()
+    scheduler.shutdown(wait=False)
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        log("Bot kapatılıyor...")
-        sys.exit(0)
+        pass
     except Exception as e:
         log(f"Kritik başlatma hatası: {e}", "error")
         traceback.print_exc()

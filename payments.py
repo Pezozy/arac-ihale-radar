@@ -35,12 +35,9 @@ async def stripe_webhook(request: Request):
         event = stripe.Webhook.construct_event(
             payload, sig, settings.STRIPE_WEBHOOK_SECRET
         )
-    except stripe.error.SignatureVerificationError:
-        log("Stripe webhook: Geçersiz imza", "error")
-        raise HTTPException(400, "Invalid signature")
     except Exception as e:
         log(f"Stripe webhook hata: {e}", "error")
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, "Invalid signature")
 
     event_type = event["type"]
     log(f"Stripe event: {event_type}")
