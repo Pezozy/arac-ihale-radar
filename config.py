@@ -8,12 +8,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _safe_int(key: str, default: int = 0) -> int:
+    val = os.getenv(key, str(default))
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
 class Settings:
     """Uygulama ayarları — .env dosyasından yüklenir."""
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    TELEGRAM_ADMIN_ID: int = int(os.getenv("TELEGRAM_ADMIN_ID", "0"))
+    TELEGRAM_ADMIN_ID: int = _safe_int("TELEGRAM_ADMIN_ID", 0)
     PUBLIC_CHANNEL_ID: str = os.getenv("PUBLIC_CHANNEL_ID", "")
 
     # AI
