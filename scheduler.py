@@ -40,6 +40,16 @@ async def morning_broadcast():
         # 1. Scrape
         scrape_result = await run_all_scrapers()
         stats["auctions_found"] = scrape_result["total_new"]
+        log(
+            f"🔍 Scrape tamamlandı: {scrape_result['total_new']} yeni ilan "
+            f"(hatalar: {scrape_result.get('errors', [])})"
+        )
+        if scrape_result["total_new"] == 0:
+            await send_telegram_message(
+                settings.TELEGRAM_ADMIN_ID,
+                f"⚠️ Sabah scrape'i sıfır ilan döndürdü.\n"
+                f"Kaynak hataları: {scrape_result.get('errors', 'yok')}",
+            )
 
         # 2. Piyasa değeri zenginleştirme
         connector = aiohttp.TCPConnector(limit=3, ssl=False)
@@ -149,11 +159,28 @@ async def morning_broadcast():
         # 5. Public kanala en iyi fırsatı gönder
         if settings.PUBLIC_CHANNEL_ID:
             best = await get_best_auction()
-            if best and best.get("ai_summary"):
-                await send_telegram_message(
+            if best:
+                # AI özeti yoksa şablon kullan (kullanıcı bültenindeki mantıkla aynı)
+                summary = best.get("ai_summary") or generate_template_summary(best)
+                ok = await send_telegram_message(
                     settings.PUBLIC_CHANNEL_ID,
-                    f"🏆 Günün Fırsatı\n\n{best['ai_summary']}\n\n"
+                    f"🏆 Günün Fırsatı\n\n{summary}\n\n"
                     f"🔔 Tüm fırsatlar için: @{settings.BOT_USERNAME}",
+                )
+                if ok:
+                    log(
+                        f"📢 Kanal güncellendi: {best.get('marka','?')} "
+                        f"{best.get('model','')} — "
+                        f"{'AI özeti' if best.get('ai_summary') else 'şablon özeti'}"
+                    )
+                else:
+                    log("📢 Kanal güncelleme başarısız (Telegram API hatası)", "error")
+            else:
+                log("📢 Kanal: son 48 saatte uygun ilan bulunamadı — kanal atlandı")
+                await send_telegram_message(
+                    settings.TELEGRAM_ADMIN_ID,
+                    "⚠️ Kanal güncellenmedi: son 48 saatte DB'de aktif ilan yok.\n"
+                    "Scraper sonuçlarını kontrol edin.",
                 )
 
         stats["alerts_sent"] = alerts_sent

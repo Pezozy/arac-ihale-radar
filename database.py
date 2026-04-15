@@ -553,15 +553,33 @@ async def get_total_sent_count(telegram_id: int) -> int:
 
 
 async def get_best_auction() -> Optional[dict]:
-    """En yüksek indirimli aktif ihaleyi döndürür."""
+    """Son 48 saatteki en iyi aktif ihaleyi döndürür.
+
+    Önce piyasa değeri bilinen (discount_pct dolu) ilanları tercih eder;
+    bulunamazsa herhangi bir güncel ilanı döndürür.
+    """
+    cutoff = (datetime.now() - timedelta(hours=48)).isoformat()
     db = await get_db()
     try:
+        # İndirim oranı bilinen ilanları tercih et
         cursor = await db.execute(
             """SELECT * FROM auctions
-               WHERE is_active = 1 AND discount_pct IS NOT NULL
-               ORDER BY discount_pct DESC LIMIT 1"""
+               WHERE is_active = 1
+                 AND discount_pct IS NOT NULL
+                 AND scraped_at >= ?
+               ORDER BY discount_pct DESC LIMIT 1""",
+            (cutoff,),
         )
         row = await cursor.fetchone()
+        if not row:
+            # Geri dönüş: piyasa değeri olmayan güncel herhangi bir ilan
+            cursor = await db.execute(
+                """SELECT * FROM auctions
+                   WHERE is_active = 1 AND scraped_at >= ?
+                   ORDER BY scraped_at DESC LIMIT 1""",
+                (cutoff,),
+            )
+            row = await cursor.fetchone()
         return dict(row) if row else None
     finally:
         await db.close()
