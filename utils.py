@@ -47,7 +47,6 @@ async def send_telegram_message(chat_id: int, text: str, **kwargs) -> bool:
         await _bot_instance.send_message(
             chat_id=chat_id,
             text=text,
-            parse_mode="HTML",
             disable_web_page_preview=True,
             **kwargs,
         )

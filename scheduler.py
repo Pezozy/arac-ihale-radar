@@ -45,10 +45,12 @@ async def morning_broadcast():
             f"(hatalar: {scrape_result.get('errors', [])})"
         )
         if scrape_result["total_new"] == 0:
+            errors = scrape_result.get("errors", [])
+            errors_text = "\n".join(f"  • {e}" for e in errors) if errors else "Yok"
             await send_telegram_message(
                 settings.TELEGRAM_ADMIN_ID,
-                f"⚠️ Sabah scrape'i sıfır ilan döndürdü.\n"
-                f"Kaynak hataları: {scrape_result.get('errors', 'yok')}",
+                f"Sabah scrape'i sifir ilan dondurdu.\n"
+                f"Kaynak hatalari:\n{errors_text}",
             )
 
         # 2. Piyasa değeri zenginleştirme

@@ -13,6 +13,7 @@ from database import (
     get_user, create_user, update_user, get_best_auction,
     get_today_sent_count, get_total_sent_count, get_dashboard_stats,
 )
+from analyzer import generate_template_summary
 from utils import log
 
 
@@ -189,21 +190,22 @@ async def durum(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ornek(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Örnek ihale ilanı gösterir."""
     best = await get_best_auction()
-    if best and best.get("ai_summary"):
-        await update.message.reply_text(best["ai_summary"])
+    if best:
+        summary = best.get("ai_summary") or generate_template_summary(best)
+        await update.message.reply_text(summary)
         await update.message.reply_text(
             "💡 Bu gerçek bir ilan örneğidir. Aboneler sabah 08:00 ve "
             "akşam 18:00'de bu formatta ilanlar alır."
         )
     else:
-        # Örnek statik ilan
+        # Veritabanında henüz ilan yok — statik örnek göster
         sample = (
             "🚗 Volkswagen Passat 2019 | 85.000 km\n"
             "📍 İstanbul — İcra İhalesi\n"
             "📅 İhale: 25.04.2026\n"
             "💰 Açılış: ₺385.000\n"
-            "📊 Piyasa: ₺620.000 | ✅ Fark: ₺235.000 (%38)\n"
-            "✅ Hasar kaydı: Belirtilmemiş\n"
+            "📊 Piyasa: ₺620.000 | Fark: ₺235.000 (%38)\n"
+            "Hasar kaydı: Belirtilmemiş\n"
             "🔗 ornek-link.gov.tr\n\n"
             "💡 Bu bir örnek ilandır. Gerçek ilanlar abonelere "
             "sabah 08:00 ve akşam 18:00'de gönderilir."

@@ -17,7 +17,7 @@ from config import settings
 from database import save_auction, update_scraper_health, cache_price, get_cached_price
 from utils import (
     log, parse_price, parse_km, parse_year, extract_marka_model,
-    normalize_sehir, KNOWN_MARKALAR,
+    normalize_sehir, KNOWN_MARKALAR, SEHIRLER_TR,
 )
 
 ua = UserAgent(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -145,9 +145,10 @@ async def scrape_ilan_gov(session: aiohttp.ClientSession) -> int:
     source_label = "Resmi İlan"
     count = 0
 
+    # Vasıta kategorisi araç ihaleleri için doğru URL
     urls = [
+        "https://www.ilan.gov.tr/ilan/kategori/vasita",
         "https://www.ilan.gov.tr/ilan/kategori/ihale",
-        "https://www.ilan.gov.tr/ilan/kategori/tasinir-mal-satisi",
     ]
 
     try:
@@ -160,50 +161,77 @@ async def scrape_ilan_gov(session: aiohttp.ClientSession) -> int:
 
                 soup = BeautifulSoup(html, "lxml")
 
-                # İlan kartlarını bul
-                listings = soup.select(".ilan-list-item, .listing-item, .card, article")
+                # ilan.gov.tr'nin gerçek HTML yapısına göre seçiciler
+                # Önce bilinen yapıyı dene, sonra genel fallback'e düş
+                listings = soup.select(
+                    ".col-md-9 .ilan-list .ilan-item, "
+                    ".listing-container .listing-item, "
+                    ".search-result-item, "
+                    ".ilan-list-item"
+                )
                 if not listings:
-                    # Alternatif seçiciler
-                    listings = soup.find_all("div", class_=re.compile(r"ilan|listing|item"))
+                    # Araç içerikli linkleri doğrudan tara
+                    listings = soup.find_all("a", href=re.compile(r"/ilan/\d+/vasita|/ilan/\d+/"))
+                if not listings:
+                    # Son çare: tüm kart/madde elementleri
+                    listings = soup.find_all(
+                        ["div", "li", "article"],
+                        class_=re.compile(r"ilan|listing|item|card|row", re.I),
+                    )
 
                 if not listings:
+                    log(f"ilan.gov.tr: {url} sayfasında ilan bulunamadı, sonraki sayfaya geçiliyor")
                     break
 
                 for item in listings:
                     try:
-                        # Başlık
-                        title_el = item.select_one("h3, h4, .title, .ilan-baslik, a")
-                        if not title_el:
+                        # Başlık — <a> etiketi içindeki metin tercih edilir
+                        link_el = item if item.name == "a" else item.select_one("a[href]")
+                        if not link_el:
                             continue
-                        title = title_el.get_text(strip=True)
+                        title = link_el.get_text(strip=True)
+                        if not title or len(title) < 5:
+                            # h2/h3/h4 dene
+                            h_el = item.select_one("h2, h3, h4, .title, .ilan-baslik")
+                            title = h_el.get_text(strip=True) if h_el else ""
+                        if not title:
+                            continue
 
-                        # Araç ile ilgili mi kontrol et
-                        desc_el = item.select_one(".description, .aciklama, p")
-                        desc = desc_el.get_text(strip=True) if desc_el else ""
-                        full_text = f"{title} {desc}"
+                        # Tüm item metnini al (açıklama, konum, fiyat taraması için)
+                        full_text = item.get_text(" ", strip=True)
 
+                        # Araç ve ihale filtresi
                         if not text_has_keywords(full_text, ARAC_KEYWORDS):
-                            continue
+                            if not text_has_keywords(title, ARAC_KEYWORDS):
+                                continue
                         if not text_has_keywords(full_text, IHALE_KEYWORDS):
-                            continue
+                            if not text_has_keywords(title, IHALE_KEYWORDS):
+                                continue
 
                         # URL
-                        link_el = item.select_one("a[href]")
-                        ihale_url = link_el["href"] if link_el else ""
-                        if ihale_url and not ihale_url.startswith("http"):
-                            ihale_url = f"https://www.ilan.gov.tr{ihale_url}"
+                        href = link_el.get("href", "") if link_el else ""
+                        ihale_url = href if href.startswith("http") else f"https://www.ilan.gov.tr{href}"
 
                         # Fiyat
-                        price_el = item.select_one(".price, .fiyat, .bedel")
-                        fiyat = parse_price(price_el.get_text()) if price_el else None
+                        price_el = item.select_one(".price, .fiyat, .bedel, .muhammen")
+                        fiyat = parse_price(price_el.get_text()) if price_el else parse_price(full_text)
 
                         # Şehir
-                        loc_el = item.select_one(".location, .sehir, .il")
+                        loc_el = item.select_one(".location, .sehir, .il, .city")
                         sehir = loc_el.get_text(strip=True) if loc_el else None
+                        if not sehir:
+                            # Metinden şehir çıkarmaya çalış
+                            for city in SEHIRLER_TR:
+                                if city.lower() in full_text.lower():
+                                    sehir = city
+                                    break
 
                         # Tarih
-                        date_el = item.select_one(".date, .tarih, time")
+                        date_el = item.select_one(".date, .tarih, time, .ihale-tarihi")
                         tarih = date_el.get_text(strip=True) if date_el else None
+                        if not tarih:
+                            tarih_match = re.search(r"(\d{1,2}[./]\d{1,2}[./]\d{2,4})", full_text)
+                            tarih = tarih_match.group(1) if tarih_match else None
 
                         auction = build_auction_dict(
                             source=source,
@@ -213,7 +241,7 @@ async def scrape_ilan_gov(session: aiohttp.ClientSession) -> int:
                             acilis_fiyati=fiyat,
                             ihale_tarihi=tarih,
                             ihale_url=ihale_url,
-                            description=desc,
+                            description=full_text,
                         )
 
                         if await save_auction(auction):
@@ -223,7 +251,7 @@ async def scrape_ilan_gov(session: aiohttp.ClientSession) -> int:
                         continue
 
                 # Sonraki sayfa var mı?
-                next_btn = soup.select_one(".pagination .next, a[rel='next']")
+                next_btn = soup.select_one(".pagination .next, a[rel='next'], .page-next")
                 if not next_btn:
                     break
 

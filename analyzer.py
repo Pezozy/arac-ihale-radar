@@ -1,6 +1,6 @@
 """
 Araç İhale Radar — AI Özet Üretici
-Groq (Llama 3.1 70B) ile Türkçe fırsat özetleri.
+Groq (Llama 3.3 70B) ile Türkçe fırsat özetleri.
 Template fallback her zaman çalışır.
 """
 import asyncio
@@ -147,7 +147,7 @@ Formatı şöyle kullan:
 
     try:
         response = await groq_client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
@@ -168,7 +168,7 @@ Formatı şöyle kullan:
             await asyncio.sleep(10)
             try:
                 response = await groq_client.chat.completions.create(
-                    model="llama-3.1-70b-versatile",
+                    model="llama-3.3-70b-versatile",
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": user_prompt},
