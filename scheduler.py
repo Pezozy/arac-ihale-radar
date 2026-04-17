@@ -44,14 +44,8 @@ async def morning_broadcast():
             f"🔍 Scrape tamamlandı: {scrape_result['total_new']} yeni ilan "
             f"(hatalar: {scrape_result.get('errors', [])})"
         )
-        if scrape_result["total_new"] == 0:
-            errors = scrape_result.get("errors", [])
-            errors_text = "\n".join(f"  • {e}" for e in errors) if errors else "Yok"
-            await send_telegram_message(
-                settings.TELEGRAM_ADMIN_ID,
-                f"Sabah scrape'i sifir ilan dondurdu.\n"
-                f"Kaynak hatalari:\n{errors_text}",
-            )
+        # Sıfır sonuç normal olabilir (tüm ilanlar zaten DB'de).
+        # Kalıcı sorunlar için health_check (her 6 saatte) admin'e bildirir.
 
         # 2. Piyasa değeri zenginleştirme
         connector = aiohttp.TCPConnector(limit=3, ssl=False)
@@ -128,12 +122,7 @@ async def morning_broadcast():
                         unsent.append(a)
 
                 if not unsent:
-                    await send_telegram_message(
-                        user["telegram_id"],
-                        "🔍 Bu sabah filtrenize uygun yeni ilan bulunamadı. "
-                        "Akşam tekrar bakacağım!\n/ayarlar ile filtrenizi genişletebilirsiniz.",
-                    )
-                    continue
+                    continue  # Gönderilecek ilan yoksa sessizce atla
 
                 # Header
                 today = datetime.now(ISTANBUL).strftime("%d.%m.%Y")
@@ -179,11 +168,6 @@ async def morning_broadcast():
                     log("📢 Kanal güncelleme başarısız (Telegram API hatası)", "error")
             else:
                 log("📢 Kanal: son 48 saatte uygun ilan bulunamadı — kanal atlandı")
-                await send_telegram_message(
-                    settings.TELEGRAM_ADMIN_ID,
-                    "⚠️ Kanal güncellenmedi: son 48 saatte DB'de aktif ilan yok.\n"
-                    "Scraper sonuçlarını kontrol edin.",
-                )
 
         stats["alerts_sent"] = alerts_sent
         stats["users_reached"] = users_reached
